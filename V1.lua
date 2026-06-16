@@ -72,7 +72,7 @@ function Library:Init(hubName)
 	-- G2L["1"] - Base ScreenGui Environment Context Hook
 	self.ScreenGui = self:NewInstance("ScreenGui", {
 		Name = "RetakeWin_Gui",
-		Parent = game.CoreGui,
+		Parent = gethui(),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		ResetOnSpawn = false
 	})
