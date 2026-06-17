@@ -63,7 +63,7 @@ local Library = {
         end
 
         function Library:Init(hubName)
-            hubName = hubName or "Retake.win"
+            hubName = hubName or "Legendary Lion Stinks"
             self.IsOpen = true
 
             -- G2L["1"] - Base ScreenGui Environment Context Hook
