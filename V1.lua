@@ -3305,7 +3305,7 @@ local Library = {
             function skinsControl:Set(val)
                 if type(val) == "table" then
                     skinsControl.Value = val
-                    self.flags["gun_skin_settings"] = val
+                    pcall(function() self.flags["gun_skin_settings"] = val end)
                     refreshSkins()
                 end
             end
