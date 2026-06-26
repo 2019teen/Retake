@@ -3,7 +3,8 @@ local Library = {
     CurrentTab = nil,
     flags = {},
     Elements = {},
-    Accent = Color3.fromRGB(183, 0, 0)
+    Accent = Color3.fromRGB(183, 0, 0),
+    _connections = {} -- tracks global event connections for cleanup
 }
 --//ANCHOR - ui
         local HttpService = game:GetService("HttpService")
@@ -27,24 +28,24 @@ local Library = {
         }
 
         local CustomFont = { } do
-            function CustomFont:New(Name, Weight, Style, Data)
-                if not isfile(Data.Id) then 
-                    writefile(Data.Id, game:HttpGet(Data.Url))
+            function CustomFont:New(Name, Weight, Style, FontData)
+                if not isfile(FontData.Id) then 
+                    writefile(FontData.Id, game:HttpGet(FontData.Url))
                 end
 
-                local Data = {
+                local fontConfig = {
                     name = Name,
                     faces = {
                         {
                             name = Name,
                             weight = Weight,
                             style = Style,
-                            assetId = getcustomasset(Data.Id)
+                            assetId = getcustomasset(FontData.Id)
                         }
                     }
                 }
 
-                writefile(`{Name}.font`, HttpService:JSONEncode(Data))
+                writefile(`{Name}.font`, HttpService:JSONEncode(fontConfig))
                 return Font.new(getcustomasset(`{Name}.font`))
             end
 
@@ -54,12 +55,225 @@ local Library = {
             })
         end
 
+        --//ANCHOR - style presets (eliminates 50+ duplicated ColorSequence definitions)
+        local GRADIENT_HEADER = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
+        })
+        local GRADIENT_DIVIDER = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
+        })
+        local GRADIENT_BOTTOM_LINE = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))
+        })
+        local GRADIENT_TAB = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(239, 239, 239)),
+            ColorSequenceKeypoint.new(0.512, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(255, 255, 255))
+        })
+        local GRADIENT_TAB_ACTIVE = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(150, 150, 150)),
+            ColorSequenceKeypoint.new(0.512, Color3.fromRGB(133, 133, 133)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(121, 121, 121))
+        })
+        local GRADIENT_BUTTON = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(219, 219, 219)),
+            ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
+        })
+        local GRADIENT_ACCENT_FILL = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(130, 130, 130))
+        })
+        local GRADIENT_SLIDER_TRACK = ColorSequence.new({
+            ColorSequenceKeypoint.new(0.000, Color3.fromRGB(223, 223, 223)),
+            ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
+            ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
+        })
+
+        --//ANCHOR - reusable helpers
         function Library:NewInstance(className, properties)
             local instance = Instance.new(className)
             for prop, val in pairs(properties) do
                 instance[prop] = val
             end
             return instance
+        end
+
+        function Library:Gradient(parent, rotation, preset)
+            return self:NewInstance("UIGradient", {
+                Parent = parent,
+                Rotation = rotation or 90,
+                Color = preset or GRADIENT_HEADER
+            })
+        end
+
+        function Library:Stroke(parent, overrides)
+            overrides = overrides or {}
+            return self:NewInstance("UIStroke", {
+                Parent = parent,
+                Color = overrides.Color or DESIGN_CONFIG.BorderColor,
+                ApplyStrokeMode = overrides.ApplyStrokeMode or Enum.ApplyStrokeMode.Border,
+                LineJoinMode = overrides.LineJoinMode or Enum.LineJoinMode.Miter,
+                ZIndex = overrides.ZIndex,
+                Thickness = overrides.Thickness,
+                Enabled = overrides.Enabled
+            })
+        end
+
+        function Library:LabelWithStroke(parent, text, extraProps)
+            extraProps = extraProps or {}
+            local label = self:NewInstance("TextLabel", {
+                Parent = parent,
+                Text = text,
+                TextSize = extraProps.TextSize or 12,
+                TextXAlignment = extraProps.TextXAlignment or Enum.TextXAlignment.Left,
+                TextColor3 = extraProps.TextColor3 or Color3.fromRGB(176, 176, 176),
+                TextStrokeTransparency = 0,
+                FontFace = DESIGN_CONFIG.FontProfile,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = extraProps.Size or UDim2.new(0, 150, 1, 0),
+                Position = extraProps.Position or UDim2.new(0, 8, 0, 0),
+                ZIndex = extraProps.ZIndex
+            })
+            self:NewInstance("UIStroke", { Parent = label, LineJoinMode = Enum.LineJoinMode.Miter })
+            return label
+        end
+
+        function Library:BottomLine(parent)
+            local line = self:NewInstance("Frame", {
+                Parent = parent,
+                ZIndex = 3,
+                BorderSizePixel = 0,
+                BackgroundColor3 = DESIGN_CONFIG.Background,
+                Size = UDim2.new(1, 0, 0, 2),
+                Position = UDim2.new(0, 0, 1, -2)
+            })
+            self:Gradient(line, 90, GRADIENT_BOTTOM_LINE)
+            return line
+        end
+
+        function Library:MakeDraggable(handle, target)
+            local uis = game:GetService("UserInputService")
+            target = target or handle
+            local dragging, dragStart, startPos
+            local conns = {}
+
+            conns.begin = handle.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = target.Position
+
+                    conns.ended = input.Changed:Connect(function()
+                        if input.UserInputState == Enum.UserInputState.End then
+                            dragging = false
+                        end
+                    end)
+                end
+            end)
+
+            conns.changed = uis.InputChanged:Connect(function(input)
+                if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                    local delta = input.Position - dragStart
+                    target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                end
+            end)
+
+            return conns
+        end
+
+        -- Sub-element container for conditional visibility
+        function Library:CreateSubContainer(parent, name)
+            local container = self:NewInstance("Frame", {
+                Name = (name or "Sub") .. "_Sub",
+                Parent = parent,
+                BorderSizePixel = 0,
+                BackgroundTransparency = 1,
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Size = UDim2.new(1, 0, 0, 0),
+                ClipsDescendants = true,
+                Visible = false
+            })
+            self:NewInstance("UIListLayout", {
+                Parent = container,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                FillDirection = Enum.FillDirection.Vertical
+            })
+            return container
+        end
+
+        function Library:AnimateSubContainer(container, show)
+            container.Visible = show
+        end
+
+        function Library:GetBindName(bind)
+            if typeof(bind) == "EnumItem" then
+                if bind == Enum.KeyCode.Unknown then return "NONE" end
+                if bind.EnumType == Enum.KeyCode then return bind.Name end
+                if bind == Enum.UserInputType.MouseButton1 then return "MB1"
+                elseif bind == Enum.UserInputType.MouseButton2 then return "MB2"
+                elseif bind == Enum.UserInputType.MouseButton3 then return "MB3"
+                elseif bind == Enum.UserInputType.MouseWheel then return "MWheel"
+                end
+            end
+            return "NONE"
+        end
+
+        function Library:IsBindMatch(input, bind)
+            if typeof(bind) == "EnumItem" and bind ~= Enum.KeyCode.Unknown then
+                if bind.EnumType == Enum.KeyCode then
+                    return input.KeyCode == bind and input.UserInputType == Enum.UserInputType.Keyboard
+                elseif bind.EnumType == Enum.UserInputType then
+                    return input.UserInputType == bind
+                end
+            end
+            return false
+        end
+
+        function Library:IsInputBindable(input)
+            return input.UserInputType == Enum.UserInputType.Keyboard
+                or input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.MouseButton2
+                or input.UserInputType == Enum.UserInputType.MouseButton3
+        end
+
+        function Library:BindFromInput(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                return input.KeyCode
+            else
+                return input.UserInputType
+            end
+        end
+
+        function Library:ResolveBind(name)
+            if name == "NONE" or name == "Unknown" then return Enum.KeyCode.Unknown end
+            if name == "MB1" then return Enum.UserInputType.MouseButton1 end
+            if name == "MB2" then return Enum.UserInputType.MouseButton2 end
+            if name == "MB3" then return Enum.UserInputType.MouseButton3 end
+            if name == "MWheel" then return Enum.UserInputType.MouseWheel end
+            return Enum.KeyCode[name] or Enum.KeyCode.Unknown
+        end
+
+        -- Track a connection for later cleanup
+        function Library:Track(connection)
+            table.insert(self._connections, connection)
+            return connection
+        end
+
+        -- Clean up all tracked connections and hide UI
+        function Library:Destroy()
+            for _, conn in ipairs(self._connections) do
+                pcall(function() conn:Disconnect() end)
+            end
+            self._connections = {}
+            if self.ScreenGui then
+                self.ScreenGui:Destroy()
+            end
         end
 
         function Library:Init(hubName)
@@ -105,15 +319,7 @@ local Library = {
             })
 
             -- G2L["4"]
-            self:NewInstance("UIGradient", {
-                Parent = headerBar,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(headerBar)
 
             -- G2L["5"] - Application Title Label Text Block
             local titleLabel = self:NewInstance("TextLabel", {
@@ -135,15 +341,7 @@ local Library = {
             self:NewInstance("UIStroke", { Parent = titleLabel, LineJoinMode = Enum.LineJoinMode.Miter })
 
             -- G2L["7"]
-            self:NewInstance("UIGradient", {
-                Parent = titleLabel,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(titleLabel)
 
             -- G2L["8"] - Top Accent Divider Trim Splitter Line
             local topAccentLine = self:NewInstance("Frame", {
@@ -157,14 +355,7 @@ local Library = {
             })
 
             -- G2L["9"]
-            self:NewInstance("UIGradient", {
-                Parent = topAccentLine,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
+            self:Gradient(topAccentLine, 90, GRADIENT_DIVIDER)
 
             -- G2L["a"] - Horizontal Navigation Control Strip
             self.TabContainer = self:NewInstance("Frame", {
@@ -177,15 +368,7 @@ local Library = {
             })
 
             -- G2L["b"]
-            self:NewInstance("UIGradient", {
-                Parent = self.TabContainer,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(239, 239, 239)),
-                    ColorSequenceKeypoint.new(0.512, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(255, 255, 255))
-                })
-            })
+            self:Gradient(self.TabContainer, 90, GRADIENT_TAB)
 
             -- G2L["c"] - Automated Flex Navigation System Grid Layer
             self:NewInstance("UIListLayout", {
@@ -209,53 +392,13 @@ local Library = {
             })
 
             -- G2L["f"]
-            self:NewInstance("UIStroke", {
-                Parent = self.PagesFolder,
-                ZIndex = 2,
-                Color = DESIGN_CONFIG.BorderColor,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(self.PagesFolder, { ZIndex = 2 })
 
             -- G2L["10"] - Modular Workspace Dynamic Structural Manifest Storage
             self.PagesRegistry = self:NewInstance("Folder", { Name = "TabPagesStorage", Parent = self.PagesFolder })
 
             -- Context Window Dragging System Architecture
-            local userInputService = game:GetService("UserInputService")
-            local dragging = false
-            local dragInput, dragStart, startPosition
-
-            headerBar.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    dragging = true
-                    dragStart = input.Position
-                    startPosition = self.MainFrame.Position
-
-                    input.Changed:Connect(function()
-                        if input.UserInputState == Enum.UserInputState.End then
-                            dragging = false
-                        end
-                    end)
-                end
-            end)
-
-            headerBar.InputChanged:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                    dragInput = input
-                end
-            end)
-
-            userInputService.InputChanged:Connect(function(input)
-                if input == dragInput and dragging then
-                    local delta = input.Position - dragStart
-                    self.MainFrame.Position = UDim2.new(
-                        startPosition.X.Scale, 
-                        startPosition.X.Offset + delta.X, 
-                        startPosition.Y.Scale, 
-                        startPosition.Y.Offset + delta.Y
-                    )
-                end
-            end)
+            self:MakeDraggable(headerBar, self.MainFrame)
 
             -- Keybind List Window Setup
             self.KeybindListFrame = self:NewInstance("Frame", {
@@ -267,15 +410,7 @@ local Library = {
                 Position = UDim2.new(0.01631, 0, 0.34245, 0)
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = self.KeybindListFrame,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(self.KeybindListFrame)
 
             local keybindTitle = self:NewInstance("TextLabel", {
                 Parent = self.KeybindListFrame,
@@ -290,15 +425,7 @@ local Library = {
                 Size = UDim2.new(1, 0, 1, 0)
             })
             self:NewInstance("UIStroke", { Parent = keybindTitle, LineJoinMode = Enum.LineJoinMode.Miter })
-            self:NewInstance("UIGradient", {
-                Parent = keybindTitle,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(keybindTitle)
 
             local listDivider = self:NewInstance("Frame", {
                 Parent = self.KeybindListFrame,
@@ -308,22 +435,9 @@ local Library = {
                 Size = UDim2.new(1, 0, 0, 2),
                 Position = UDim2.new(0, 0, 1, 0)
             })
-            self:NewInstance("UIGradient", {
-                Parent = listDivider,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
+            self:Gradient(listDivider, 90, GRADIENT_DIVIDER)
 
-            self:NewInstance("UIStroke", {
-                Parent = self.KeybindListFrame,
-                ZIndex = 2,
-                Color = Color3.fromRGB(16, 16, 16),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(self.KeybindListFrame, { ZIndex = 2, Color = Color3.fromRGB(16, 16, 16) })
 
             local bindHolder = self:NewInstance("Frame", {
                 Parent = self.KeybindListFrame,
@@ -333,21 +447,8 @@ local Library = {
                 Size = UDim2.new(1, 0, 0, 2),
                 Position = UDim2.new(0, 0, 1, 2)
             })
-            self:NewInstance("UIGradient", {
-                Parent = bindHolder,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
-            self:NewInstance("UIStroke", {
-                Parent = bindHolder,
-                ZIndex = 2,
-                Color = Color3.fromRGB(16, 16, 16),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Gradient(bindHolder, 90, GRADIENT_DIVIDER)
+            self:Stroke(bindHolder, { ZIndex = 2, Color = Color3.fromRGB(16, 16, 16) })
 
             self.KeybindContainer = self:NewInstance("Frame", {
                 Parent = bindHolder,
@@ -361,58 +462,11 @@ local Library = {
                 Parent = self.KeybindContainer,
                 SortOrder = Enum.SortOrder.LayoutOrder
             })
-            self:NewInstance("UIGradient", {
-                Parent = self.KeybindContainer,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
-            self:NewInstance("UIStroke", {
-                Parent = self.KeybindContainer,
-                ZIndex = 2,
-                Color = Color3.fromRGB(16, 16, 16),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Gradient(self.KeybindContainer)
+            self:Stroke(self.KeybindContainer, { ZIndex = 2, Color = Color3.fromRGB(16, 16, 16) })
 
             -- Dragging for Keybind List
-            local draggingList = false
-            local dragInputList, dragStartList, startPositionList
-
-            self.KeybindListFrame.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    draggingList = true
-                    dragStartList = input.Position
-                    startPositionList = self.KeybindListFrame.Position
-
-                    input.Changed:Connect(function()
-                        if input.UserInputState == Enum.UserInputState.End then
-                            draggingList = false
-                        end
-                    end)
-                end
-            end)
-
-            self.KeybindListFrame.InputChanged:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                    dragInputList = input
-                end
-            end)
-
-            userInputService.InputChanged:Connect(function(input)
-                if input == dragInputList and draggingList then
-                    local delta = input.Position - dragStartList
-                    self.KeybindListFrame.Position = UDim2.new(
-                        startPositionList.X.Scale, 
-                        startPositionList.X.Offset + delta.X, 
-                        startPositionList.Y.Scale, 
-                        startPositionList.Y.Offset + delta.Y
-                    )
-                end
-            end)
+            self:MakeDraggable(self.KeybindListFrame)
 
             -- Notifications container setup
             self.NotificationsContainer = self:NewInstance("Frame", {
@@ -448,15 +502,7 @@ local Library = {
                 BorderMode = Enum.BorderMode.Inset
             })
 
-            tab.Gradient = self:NewInstance("UIGradient", {
-                Parent = tab.Button,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(239, 239, 239)),
-                    ColorSequenceKeypoint.new(0.512, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(255, 255, 255))
-                })
-            })
+            tab.Gradient = self:Gradient(tab.Button, 90, GRADIENT_TAB)
 
             tab.Label = self:NewInstance("TextLabel", {
                 Parent = tab.Button,
@@ -470,12 +516,7 @@ local Library = {
                 Size = UDim2.new(1, 0, 1, 0)
             })
 
-            tab.Stroke1 = self:NewInstance("UIStroke", { 
-                Parent = tab.Button, 
-                Color = DESIGN_CONFIG.BorderColor,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, 
-                LineJoinMode = Enum.LineJoinMode.Miter 
-            })
+            tab.Stroke1 = self:Stroke(tab.Button)
 
             self:NewInstance("UIStroke", { Parent = tab.Label, LineJoinMode = Enum.LineJoinMode.Miter })
 
@@ -490,14 +531,7 @@ local Library = {
                 BorderColor3 = Color3.fromRGB(0, 0, 0)
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = tab.indicator,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(154, 154, 154))
-                })
-            })
+            self:Gradient(tab.indicator, 90, GRADIENT_BOTTOM_LINE)
 
             -- G2L["11"] - Primary Tab Page Viewing Shell Frame
             tab.PageFrame = self:NewInstance("CanvasGroup", {
@@ -533,12 +567,7 @@ local Library = {
                 SortOrder = Enum.SortOrder.LayoutOrder
             })
 
-            self:NewInstance("UIStroke", {
-                Parent = tab.LeftColumn,
-                ZIndex = 0,
-                Color = Color3.fromRGB(10, 10, 10),
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(tab.LeftColumn, { ZIndex = 0, Color = Color3.fromRGB(10, 10, 10), ApplyStrokeMode = nil })
 
             -- G2L["32"] - Right Column Structural Layout Scrolling Canvas
             tab.RightColumn = self:NewInstance("ScrollingFrame", {
@@ -561,12 +590,7 @@ local Library = {
                 SortOrder = Enum.SortOrder.LayoutOrder
             })
 
-            self:NewInstance("UIStroke", {
-                Parent = tab.RightColumn,
-                ZIndex = 0,
-                Color = Color3.fromRGB(10, 10, 10),
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(tab.RightColumn, { ZIndex = 0, Color = Color3.fromRGB(10, 10, 10), ApplyStrokeMode = nil })
 
             local function activate()
                 if self.CurrentTab == tab then return end
@@ -582,11 +606,7 @@ local Library = {
                     tweenService:Create(oldTab.Label, colorTweenInfo, { TextColor3 = Color3.fromRGB(145, 145, 145) }):Play()
                     tweenService:Create(oldTab.Button, colorTweenInfo, { BackgroundColor3 = Color3.fromRGB(26, 26, 26) }):Play()
 
-                    oldTab.Gradient.Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0.000, Color3.fromRGB(239, 239, 239)),
-                        ColorSequenceKeypoint.new(0.512, Color3.fromRGB(255, 255, 255)),
-                        ColorSequenceKeypoint.new(1.000, Color3.fromRGB(255, 255, 255))
-                    })
+                    oldTab.Gradient.Color = GRADIENT_TAB
 
                     oldTab.Stroke1.Enabled = true	
                     oldTab.indicator.Visible = true
@@ -599,11 +619,7 @@ local Library = {
                 tweenService:Create(tab.Label, colorTweenInfo, { TextColor3 = self.Accent }):Play()
                 tweenService:Create(tab.Button, colorTweenInfo, { BackgroundColor3 = Color3.fromRGB(45, 45, 45) }):Play()
 
-                tab.Gradient.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(150, 150, 150)),
-                    ColorSequenceKeypoint.new(0.512, Color3.fromRGB(133, 133, 133)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(121, 121, 121))
-                })
+                tab.Gradient.Color = GRADIENT_TAB_ACTIVE
 
                 tab.Stroke1.Enabled = false
                 tab.indicator.Visible = false
@@ -620,11 +636,7 @@ local Library = {
                 tab.Stroke1.Enabled = false
                 tab.indicator.Visible = false
                 tab.Button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                tab.Gradient.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(150, 150, 150)),
-                    ColorSequenceKeypoint.new(0.512, Color3.fromRGB(133, 133, 133)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(121, 121, 121))
-                })
+                tab.Gradient.Color = GRADIENT_TAB_ACTIVE
             end
 
             return tab
@@ -644,22 +656,9 @@ local Library = {
                 BorderColor3 = Color3.fromRGB(0, 0, 0)
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = section.Frame,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(section.Frame)
 
-            self:NewInstance("UIStroke", {
-                Parent = section.Frame,
-                Color = Color3.fromRGB(40, 40, 40),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(section.Frame, { Color = Color3.fromRGB(40, 40, 40) })
 
             -- G2L["2f"] - Header Section Text Display Label
             section.Title = self:NewInstance("TextLabel", {
@@ -689,14 +688,7 @@ local Library = {
                 BorderColor3 = Color3.fromRGB(0, 0, 0)
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = section.Container,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
+            self:Gradient(section.Container, 90, GRADIENT_DIVIDER)
 
             self:NewInstance("UIListLayout", {
                 Parent = section.Container,
@@ -713,6 +705,7 @@ local Library = {
 
             local toggleName = config.name or "Toggle"
             local flag = config.flag
+            local bindFlag = config.bindFlag
             local callback = config.callback
 
             local toggle = { 
@@ -727,6 +720,10 @@ local Library = {
             if flag then
                 Library.flags[flag] = toggle.State
                 Library.Elements[flag] = toggle
+            end
+            if bindFlag then
+                Library.flags[bindFlag] = toggle.Bind
+                Library.Elements[bindFlag] = toggle
             end
 
             local tweenInfo = TweenInfo.new(DESIGN_CONFIG.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -781,16 +778,8 @@ local Library = {
                 ZIndex = 5
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = toggle.StatusBox,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                })
-            })
-            self:NewInstance("UIStroke", { Parent = toggle.StatusBox, ZIndex = 6, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Gradient(toggle.StatusBox)
+            self:Stroke(toggle.StatusBox, { ZIndex = 6, Color = Color3.fromRGB(9, 9, 9) })
 
             toggle.IndicatorFill = self:NewInstance("Frame", {
                 Parent = toggle.StatusBox,
@@ -801,24 +790,9 @@ local Library = {
                 ZIndex = 7
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = toggle.IndicatorFill,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(130, 130, 130))
-                })
-            })
+            self:Gradient(toggle.IndicatorFill, 90, GRADIENT_ACCENT_FILL)
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = surfaceRow,
-                ZIndex = 3,
-                BorderSizePixel = 0,
-                BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, -2)
-            })
-            self:NewInstance("UIGradient", { Parent = bottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))}) })
+            self:BottomLine(surfaceRow)
 
             -- DETACHED SCREEN-LEVEL KEYBIND OVERLAY
             local bindMenu = self:NewInstance("Frame", {
@@ -832,7 +806,7 @@ local Library = {
                 Visible = false,
                 ZIndex = 9999 
             })
-            self:NewInstance("UIStroke", { Parent = bindMenu, ZIndex = 101, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Stroke(bindMenu, { ZIndex = 101, Color = Color3.fromRGB(9, 9, 9) })
 
             local menuHeader = self:NewInstance("Frame", {
                 Parent = bindMenu,
@@ -841,7 +815,7 @@ local Library = {
                 BorderSizePixel = 0,
                 ZIndex = 102
             })
-            self:NewInstance("UIGradient", { Parent = menuHeader, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))}) })
+            self:Gradient(menuHeader)
 
             local menuTitle = self:NewInstance("TextLabel", {
                 Parent = menuHeader,
@@ -878,7 +852,7 @@ local Library = {
 
             local bindTextBtn = self:NewInstance("TextButton", {
                 Parent = bindTriggerRow,
-                Text = "[" .. (toggle.Bind == Enum.KeyCode.Unknown and "NONE" or toggle.Bind.Name) .. "]",
+                Text = "[" .. Library:GetBindName(toggle.Bind) .. "]",
                 TextSize = 12,
                 FontFace = DESIGN_CONFIG.FontProfile,
                 TextColor3 = Color3.fromRGB(109, 109, 109),
@@ -889,7 +863,26 @@ local Library = {
                 AutoButtonColor = false,
                 ZIndex = 103
             })
-            self:NewInstance("UIStroke", { Parent = bindTextBtn, ZIndex = 104, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Stroke(bindTextBtn, { ZIndex = 104, Color = Color3.fromRGB(9, 9, 9) })
+
+            local clearBindBtn = self:NewInstance("TextButton", {
+                Parent = bindTriggerRow,
+                Text = "x",
+                TextSize = 10,
+                FontFace = DESIGN_CONFIG.FontProfile,
+                TextColor3 = Color3.fromRGB(180, 60, 60),
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 14, 0, 14),
+                Position = UDim2.new(1, -2, 0.5, 0),
+                AnchorPoint = Vector2.new(1, 0.5),
+                ZIndex = 104
+            })
+            clearBindBtn.MouseButton1Click:Connect(function()
+                toggle.Bind = Enum.KeyCode.Unknown
+                bindTextBtn.Text = "[NONE]"
+                if bindFlag then Library.flags[bindFlag] = Enum.KeyCode.Unknown end
+                Library:UpdateKeybindList()
+            end)
 
             local rowSplitLine = self:NewInstance("Frame", {
                 Parent = bindTriggerRow,
@@ -899,7 +892,7 @@ local Library = {
                 Size = UDim2.new(1, 0, 0, 2),
                 Position = UDim2.new(0, 0, 1, 0)
             })
-            self:NewInstance("UIGradient", { Parent = rowSplitLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(154, 154, 154))}) })
+            self:Gradient(rowSplitLine, 90, GRADIENT_BOTTOM_LINE)
 
             local modeTriggerRow = self:NewInstance("Frame", {
                 Parent = bindMenu,
@@ -918,7 +911,7 @@ local Library = {
                 AutoButtonColor = false,
                 ZIndex = 103
             })
-            self:NewInstance("UIStroke", { Parent = modeDropdownBtn, ZIndex = 104, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Stroke(modeDropdownBtn, { ZIndex = 104, Color = Color3.fromRGB(9, 9, 9) })
 
             local modeDisplayLabel = self:NewInstance("TextLabel", {
                 Parent = modeDropdownBtn,
@@ -953,7 +946,7 @@ local Library = {
                 Size = UDim2.new(1, 0, 0, 2),
                 Position = UDim2.new(0, 0, 1, 0)
             })
-            self:NewInstance("UIGradient", { Parent = modeBottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(154, 154, 154))}) })
+            self:Gradient(modeBottomLine, 90, GRADIENT_BOTTOM_LINE)
 
             local function updateToggleState(forcedState)
                 if toggle.Mode == "Always" then
@@ -977,6 +970,18 @@ local Library = {
 
                 if callback then
                     callback(toggle.State)
+                end
+
+                -- Sub-element visibility
+                if toggle.SubContainer then
+                    Library:AnimateSubContainer(toggle.SubContainer, toggle.State)
+                    if toggle._subBuilder then
+                        -- Clear existing children to prevent duplication
+                        for _, child in ipairs(toggle.SubContainer:GetChildren()) do
+                            if child:IsA("GuiObject") then child:Destroy() end
+                        end
+                        toggle._subBuilder(toggle.SubContainer, toggle.State)
+                    end
                 end
             end
 
@@ -1025,7 +1030,7 @@ local Library = {
                 isHovering = false
             end)
 
-            userInputService.InputBegan:Connect(function(input, processed)
+            self:Track(userInputService.InputBegan:Connect(function(input, processed)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
                     if toggle.MenuOpen and not toggle.BindingModeActive then
                         local mousePos = userInputService:GetMouseLocation()
@@ -1034,7 +1039,7 @@ local Library = {
                         end
                     end
                 end
-            end)
+            end))
 
             toggle.Frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
                 if toggle.MenuOpen then
@@ -1074,42 +1079,45 @@ local Library = {
 
                 local connection
                 connection = userInputService.InputBegan:Connect(function(input, processed)
-                    if processed then return end
-                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                    -- Always allow Escape to unbind (engine marks it as processed)
+                    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
                         connection:Disconnect()
-
-                        if input.KeyCode == Enum.KeyCode.Escape then
-                            toggle.Bind = Enum.KeyCode.Unknown
-                            bindTextBtn.Text = "[NONE]"
-                        else
-                            toggle.Bind = input.KeyCode
-                            bindTextBtn.Text = "[" .. input.KeyCode.Name .. "]"
-                        end
-
+                        toggle.Bind = Enum.KeyCode.Unknown
+                        bindTextBtn.Text = "[NONE]"
                         bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
                         toggle.BindingModeActive = false
+                        if bindFlag then Library.flags[bindFlag] = Enum.KeyCode.Unknown end
+                        Library:UpdateKeybindList()
+                        return
+                    end
+                    if processed then return end
+                    if Library:IsInputBindable(input) then
+                        connection:Disconnect()
+                        toggle.Bind = Library:BindFromInput(input)
+                        bindTextBtn.Text = "[" .. Library:GetBindName(toggle.Bind) .. "]"
+                        bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
+                        toggle.BindingModeActive = false
+                        if bindFlag then Library.flags[bindFlag] = toggle.Bind end
                         Library:UpdateKeybindList()
                     end
                 end)
             end)
 
-            userInputService.InputBegan:Connect(function(input, processed)
-                if processed or toggle.Bind == Enum.KeyCode.Unknown then return end
-                if input.KeyCode == toggle.Bind then
-                    if toggle.Mode == "Toggle" then
-                        updateToggleState()
-                    elseif toggle.Mode == "Hold" then
-                        updateToggleState(true)
-                    end
+            self:Track(userInputService.InputBegan:Connect(function(input, processed)
+                if processed or not Library:IsBindMatch(input, toggle.Bind) then return end
+                if toggle.Mode == "Toggle" then
+                    updateToggleState()
+                elseif toggle.Mode == "Hold" then
+                    updateToggleState(true)
                 end
-            end)
+            end))
 
-            userInputService.InputEnded:Connect(function(input, processed)
-                if toggle.Bind == Enum.KeyCode.Unknown then return end
-                if input.KeyCode == toggle.Bind and toggle.Mode == "Hold" then
+            self:Track(userInputService.InputEnded:Connect(function(input, processed)
+                if not Library:IsBindMatch(input, toggle.Bind) then return end
+                if toggle.Mode == "Hold" then
                     updateToggleState(false)
                 end
-            end)
+            end))
 
             toggle.Frame.Destroying:Connect(function()
                 bindMenu:Destroy()
@@ -1121,7 +1129,8 @@ local Library = {
 
             function toggle:SetBind(key)
                 toggle.Bind = key
-                bindTextBtn.Text = "[" .. (key == Enum.KeyCode.Unknown and "NONE" or key.Name) .. "]"
+                bindTextBtn.Text = "[" .. Library:GetBindName(key) .. "]"
+                if bindFlag then Library.flags[bindFlag] = key end
                 Library:UpdateKeybindList()
             end
 
@@ -1138,6 +1147,20 @@ local Library = {
                     updateToggleState(false)
                 end
                 Library:UpdateKeybindList()
+            end
+
+            function toggle:AddSubElement(builder)
+                if not toggle.SubContainer then
+                    local sectionContainer = toggle.Frame.Parent
+                    toggle.SubContainer = Library:CreateSubContainer(sectionContainer, toggleName)
+                    toggle.SubContainer.LayoutOrder = toggle.Frame.LayoutOrder + 0.5
+                end
+                toggle._subBuilder = builder
+                builder(toggle.SubContainer, toggle.State)
+                if toggle.State then
+                    Library:AnimateSubContainer(toggle.SubContainer, true)
+                end
+                return toggle
             end
 
             function toggle:CreateColorPicker(config)
@@ -1196,23 +1219,9 @@ local Library = {
                 AutoButtonColor = false
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = slider.Track,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(223, 223, 223)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(slider.Track, 90, GRADIENT_SLIDER_TRACK)
 
-            self:NewInstance("UIStroke", {
-                Parent = slider.Track,
-                ZIndex = 2,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(slider.Track, { ZIndex = 2, Color = Color3.fromRGB(9, 9, 9) })
 
             slider.Fill = self:NewInstance("Frame", {
                 Parent = slider.Track,
@@ -1221,14 +1230,7 @@ local Library = {
                 Size = UDim2.new(0, 0, 1, 0)
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = slider.Fill,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(130, 130, 130))
-                })
-            })
+            self:Gradient(slider.Fill, 90, GRADIENT_ACCENT_FILL)
 
             slider.ValLabel = self:NewInstance("TextLabel", {
                 Parent = slider.Track,
@@ -1272,23 +1274,7 @@ local Library = {
                 FontFace = DESIGN_CONFIG.FontProfile 
             })
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = slider.Frame,
-                ZIndex = 3,
-                BorderSizePixel = 0,
-                BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, 0)
-            })
-
-            self:NewInstance("UIGradient", {
-                Parent = bottomLine,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))
-                })
-            })
+            self:BottomLine(slider.Frame)
 
             local isDragging = false
 
@@ -1304,6 +1290,14 @@ local Library = {
                 end
                 if config.callback then 
                     config.callback(slider.Value) 
+                end
+
+                -- Sub-element update
+                if slider._subBuilder then
+                    for _, child in ipairs(slider.SubContainer:GetChildren()) do
+                        if child:IsA("GuiObject") then child:Destroy() end
+                    end
+                    slider._subBuilder(slider.SubContainer, slider.Value)
                 end
             end
 
@@ -1321,23 +1315,35 @@ local Library = {
                 end
             end)
 
-            userInputService.InputChanged:Connect(function(input)
+            self:Track(userInputService.InputChanged:Connect(function(input)
                 if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                     updateFromInput(input)
                 end
-            end)
+            end))
 
-            userInputService.InputEnded:Connect(function(input)
+            self:Track(userInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                     isDragging = false
                 end
-            end)
+            end))
 
             decBtn.MouseButton1Click:Connect(function() updateToValue(slider.Value - step) end)
             incBtn.MouseButton1Click:Connect(function() updateToValue(slider.Value + step) end)
 
             function slider:Set(val)
                 updateToValue(val)
+            end
+
+            function slider:AddSubElement(builder)
+                if not slider.SubContainer then
+                    local sectionContainer = slider.Frame.Parent
+                    slider.SubContainer = Library:CreateSubContainer(sectionContainer, sliderName)
+                    slider.SubContainer.LayoutOrder = slider.Frame.LayoutOrder + 0.5
+                end
+                slider._subBuilder = builder
+                builder(slider.SubContainer, slider.Value)
+                Library:AnimateSubContainer(slider.SubContainer, true)
+                return slider
             end
 
             updateToValue(slider.Value)
@@ -1402,23 +1408,9 @@ local Library = {
                 ZIndex = 10 
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = dropdown.MainButton,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(219, 219, 219)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                })
-            })
+            self:Gradient(dropdown.MainButton, 90, GRADIENT_BUTTON)
 
-            self:NewInstance("UIStroke", {
-                Parent = dropdown.MainButton,
-                ZIndex = 11,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(dropdown.MainButton, { ZIndex = 11, Color = Color3.fromRGB(9, 9, 9) })
 
             dropdown.SelectionDisplay = self:NewInstance("TextLabel", {
                 Parent = dropdown.MainButton,
@@ -1451,23 +1443,7 @@ local Library = {
                 FontFace = DESIGN_CONFIG.FontProfile
             })
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = dropdown.Frame,
-                ZIndex = 3,
-                BorderSizePixel = 0,
-                BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, -2)
-            })
-
-            self:NewInstance("UIGradient", {
-                Parent = bottomLine,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))
-                })
-            })
+            self:BottomLine(dropdown.Frame)
 
             dropdown.Container = self:NewInstance("Frame", {
                 Name = "OptionsContainer",
@@ -1487,13 +1463,7 @@ local Library = {
                 FillDirection = Enum.FillDirection.Vertical
             })
 
-            self:NewInstance("UIStroke", {
-                Parent = dropdown.Container,
-                ZIndex = 101,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(dropdown.Container, { ZIndex = 101, Color = Color3.fromRGB(9, 9, 9) })
 
             local function selectOption(optionValue)
                 dropdown.Value = optionValue
@@ -1514,19 +1484,28 @@ local Library = {
                 if config.callback then
                     config.callback(optionValue)
                 end
+
+                -- Sub-element update
+                if dropdown._subBuilder then
+                    for _, child in ipairs(dropdown.SubContainer:GetChildren()) do
+                        if child:IsA("GuiObject") then child:Destroy() end
+                    end
+                    dropdown._subBuilder(dropdown.SubContainer, optionValue)
+                end
             end
 
             local function toggleState()
                 dropdown.Open = not dropdown.Open
 
                 dropdown.Frame.ZIndex = dropdown.Open and 10 or 1
-                if sectionParent and sectionParent.Frame then
+                if sectionParent then
+                    local zFrame = sectionParent.Frame or sectionParent
                     if dropdown.Open then
                         sectionParent.OpenDropdowns = (sectionParent.OpenDropdowns or 0) + 1
                     else
                         sectionParent.OpenDropdowns = math.max(0, (sectionParent.OpenDropdowns or 0) - 1)
                     end
-                    sectionParent.Frame.ZIndex = (sectionParent.OpenDropdowns > 0) and 10 or 1
+                    zFrame.ZIndex = (sectionParent.OpenDropdowns > 0) and 10 or 1
                 end
 
                 local targetContainerHeight = dropdown.Open and (#options * 16) or 0
@@ -1582,6 +1561,18 @@ local Library = {
                 selectOption(val)
             end
 
+            function dropdown:AddSubElement(builder)
+                if not dropdown.SubContainer then
+                    local sectionContainer = dropdown.Frame.Parent
+                    dropdown.SubContainer = Library:CreateSubContainer(sectionContainer, dropdownName)
+                    dropdown.SubContainer.LayoutOrder = dropdown.Frame.LayoutOrder + 0.5
+                end
+                dropdown._subBuilder = builder
+                builder(dropdown.SubContainer, dropdown.Value)
+                Library:AnimateSubContainer(dropdown.SubContainer, true)
+                return dropdown
+            end
+
             function dropdown:Refresh(newOptions, selectDefault)
                 for _, btn in pairs(dropdown.OptionInstances) do
                     btn:Destroy()
@@ -1624,6 +1615,330 @@ local Library = {
             return dropdown
         end
 
+        function Library:CreateMultiDropdown(sectionParent, config)
+            local dropdownName = config.name or "Multi-Dropdown"
+            local options = config.options or {}
+            local flag = config.flag
+
+            local multidrop = {
+                Value = config.default or {},
+                Open = false,
+                OptionInstances = {},
+                _isMulti = true
+            }
+
+            local checkFillMap = {} -- stores checkFill frames per option (can't use custom props on Instances)
+
+            if flag then
+                self.flags[flag] = multidrop.Value
+                self.Elements[flag] = multidrop
+            end
+
+            local tweenService = game:GetService("TweenService")
+            local tweenInfo = TweenInfo.new(DESIGN_CONFIG.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+            multidrop.Frame = self:NewInstance("Frame", {
+                Name = dropdownName .. "MultiNode",
+                Parent = sectionParent.Container,
+                BorderSizePixel = 0,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 213, 0, 43),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                ClipsDescendants = false
+            })
+
+            multidrop.Label = self:NewInstance("TextLabel", {
+                Parent = multidrop.Frame,
+                Text = dropdownName,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = Color3.fromRGB(176, 176, 176),
+                TextStrokeTransparency = 0,
+                FontFace = DESIGN_CONFIG.FontProfile,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0, 100, 0, 18),
+                Position = UDim2.new(0, 8, 0, 2),
+                ZIndex = 1
+            })
+            self:NewInstance("UIStroke", { Parent = multidrop.Label, LineJoinMode = Enum.LineJoinMode.Miter })
+
+            multidrop.MainButton = self:NewInstance("TextButton", {
+                Parent = multidrop.Frame,
+                BorderSizePixel = 0,
+                BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                Size = UDim2.new(0, 199, 0, 15),
+                Position = UDim2.new(0, 8, 0, 21),
+                Text = "",
+                AutoButtonColor = false,
+                ZIndex = 10
+            })
+            self:Gradient(multidrop.MainButton, 90, GRADIENT_BUTTON)
+            self:Stroke(multidrop.MainButton, { ZIndex = 11, Color = Color3.fromRGB(9, 9, 9) })
+
+            multidrop.SelectionDisplay = self:NewInstance("TextLabel", {
+                Parent = multidrop.MainButton,
+                Text = "None selected",
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = Color3.fromRGB(157, 157, 157),
+                TextStrokeTransparency = 0,
+                FontFace = DESIGN_CONFIG.FontProfile,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0.68339, 0, 1, 0),
+                Position = UDim2.new(0.03518, 0, 0, 0),
+                ZIndex = 12
+            })
+            self:NewInstance("UIStroke", { Parent = multidrop.SelectionDisplay, LineJoinMode = Enum.LineJoinMode.Miter })
+
+            multidrop.ToggleIcon = self:NewInstance("TextButton", {
+                Parent = multidrop.Frame,
+                Text = "+",
+                TextSize = 12,
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0, 8, 0, 8),
+                Position = UDim2.new(0, 207, 0.65, 0),
+                AnchorPoint = Vector2.new(1, 0.5),
+                ZIndex = 12,
+                FontFace = DESIGN_CONFIG.FontProfile
+            })
+
+            self:BottomLine(multidrop.Frame)
+
+            multidrop.Container = self:NewInstance("Frame", {
+                Name = "OptionsContainer",
+                Parent = multidrop.Frame,
+                BorderSizePixel = 0,
+                BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                Size = UDim2.new(0, 199, 0, 0),
+                Position = UDim2.new(0, 8, 0, 37),
+                Visible = false,
+                ClipsDescendants = true,
+                ZIndex = 100
+            })
+            self:NewInstance("UIListLayout", {
+                Parent = multidrop.Container,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                FillDirection = Enum.FillDirection.Vertical
+            })
+            self:Stroke(multidrop.Container, { ZIndex = 101, Color = Color3.fromRGB(9, 9, 9) })
+
+            local function updateSelectionDisplay()
+                local count = 0
+                for _ in pairs(multidrop.Value) do count = count + 1 end
+                if count == 0 then
+                    multidrop.SelectionDisplay.Text = "None selected"
+                    multidrop.SelectionDisplay.TextColor3 = Color3.fromRGB(157, 157, 157)
+                elseif count == 1 then
+                    multidrop.SelectionDisplay.Text = next(multidrop.Value) .. ""
+                    multidrop.SelectionDisplay.TextColor3 = self.Accent
+                else
+                    multidrop.SelectionDisplay.Text = count .. " selected"
+                    multidrop.SelectionDisplay.TextColor3 = self.Accent
+                end
+            end
+
+            local function toggleOption(optionName)
+                if multidrop.Value[optionName] then
+                    multidrop.Value[optionName] = nil
+                else
+                    multidrop.Value[optionName] = true
+                end
+
+                if flag then self.flags[flag] = multidrop.Value end
+                updateSelectionDisplay()
+
+                -- Update checkbox visuals
+                for opt, btn in pairs(multidrop.OptionInstances) do
+                    local fill = checkFillMap[opt]
+                    if fill then
+                        fill.BackgroundTransparency = multidrop.Value[opt] and 0 or 1
+                    end
+                end
+
+                if config.callback then
+                    config.callback(multidrop.Value)
+                end
+            end
+
+            local function toggleOpen()
+                multidrop.Open = not multidrop.Open
+
+                multidrop.Frame.ZIndex = multidrop.Open and 10 or 1
+                if sectionParent then
+                    local zFrame = sectionParent.Frame or sectionParent
+                    if multidrop.Open then
+                        sectionParent.OpenDropdowns = (sectionParent.OpenDropdowns or 0) + 1
+                    else
+                        sectionParent.OpenDropdowns = math.max(0, (sectionParent.OpenDropdowns or 0) - 1)
+                    end
+                    zFrame.ZIndex = (sectionParent.OpenDropdowns > 0) and 10 or 1
+                end
+
+                local targetHeight = multidrop.Open and (#options * 20) or 0
+                local targetRotation = multidrop.Open and 45 or 0
+
+                if multidrop.Open then
+                    multidrop.Container.Visible = true
+                end
+
+                local ct = tweenService:Create(multidrop.Container, tweenInfo, { Size = UDim2.new(0, 199, 0, targetHeight) })
+                local it = tweenService:Create(multidrop.ToggleIcon, tweenInfo, { Rotation = targetRotation })
+                ct:Play()
+                it:Play()
+
+                if not multidrop.Open then
+                    ct.Completed:Connect(function()
+                        if not multidrop.Open then multidrop.Container.Visible = false end
+                    end)
+                end
+            end
+
+            for _, optName in ipairs(options) do
+                local rowBtn = self:NewInstance("TextButton", {
+                    Name = optName .. "_MOpt",
+                    Parent = multidrop.Container,
+                    Size = UDim2.new(1, 0, 0, 20),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    Text = "",
+                    ZIndex = 102,
+                    AutoButtonColor = false
+                })
+
+                local optLabel = self:NewInstance("TextLabel", {
+                    Parent = rowBtn,
+                    Text = "  " .. optName,
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextColor3 = Color3.fromRGB(157, 157, 157),
+                    FontFace = DESIGN_CONFIG.FontProfile,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(0, 160, 1, 0),
+                    ZIndex = 103
+                })
+
+                local checkBox = self:NewInstance("Frame", {
+                    Parent = rowBtn,
+                    BorderSizePixel = 0,
+                    BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                    Size = UDim2.new(0, 10, 0, 10),
+                    Position = UDim2.new(0, 185, 0.5, 0),
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    ZIndex = 103
+                })
+                self:Stroke(checkBox, { Color = Color3.fromRGB(9, 9, 9) })
+
+                local checkFill = self:NewInstance("Frame", {
+                    Parent = checkBox,
+                    BorderSizePixel = 0,
+                    BackgroundColor3 = self.Accent,
+                    Size = UDim2.new(1, -4, 1, -4),
+                    Position = UDim2.new(0, 2, 0, 2),
+                    BackgroundTransparency = multidrop.Value[optName] and 0 or 1,
+                    ZIndex = 104
+                })
+
+                rowBtn.MouseButton1Click:Connect(function()
+                    toggleOption(optName)
+                end)
+
+                checkFillMap[optName] = checkFill
+                multidrop.OptionInstances[optName] = rowBtn
+            end
+
+            multidrop.MainButton.MouseButton1Click:Connect(toggleOpen)
+            multidrop.ToggleIcon.MouseButton1Click:Connect(toggleOpen)
+
+            function multidrop:Set(valuesTable)
+                multidrop.Value = {}
+                if type(valuesTable) == "table" then
+                    for _, v in ipairs(valuesTable) do
+                        if table.find(options, v) then
+                            multidrop.Value[v] = true
+                        end
+                    end
+                end
+                if flag then Library.flags[flag] = multidrop.Value end
+                updateSelectionDisplay()
+                for opt, btn in pairs(multidrop.OptionInstances) do
+                    local fill = checkFillMap[opt]
+                    if fill then
+                        fill.BackgroundTransparency = multidrop.Value[opt] and 0 or 1
+                    end
+                end
+            end
+
+            function multidrop:Refresh(newOptions, keepSelected)
+                for _, btn in pairs(multidrop.OptionInstances) do
+                    btn:Destroy()
+                end
+                multidrop.OptionInstances = {}
+                local oldValue = multidrop.Value
+                if not keepSelected then multidrop.Value = {} end
+                options = newOptions
+
+                for _, optName in ipairs(options) do
+                    local rowBtn = Library:NewInstance("TextButton", {
+                        Name = optName .. "_MOpt",
+                        Parent = multidrop.Container,
+                        Size = UDim2.new(1, 0, 0, 20),
+                        BackgroundTransparency = 1,
+                        BorderSizePixel = 0,
+                        Text = "",
+                        ZIndex = 102,
+                        AutoButtonColor = false
+                    })
+                    local optLabel = Library:NewInstance("TextLabel", {
+                        Parent = rowBtn, Text = "  " .. optName, TextSize = 12,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextColor3 = Color3.fromRGB(157, 157, 157),
+                        FontFace = DESIGN_CONFIG.FontProfile, BackgroundTransparency = 1,
+                        Size = UDim2.new(0, 160, 1, 0), ZIndex = 103
+                    })
+                    local checkBox = Library:NewInstance("Frame", {
+                        Parent = rowBtn, BorderSizePixel = 0,
+                        BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                        Size = UDim2.new(0, 10, 0, 10),
+                        Position = UDim2.new(0, 185, 0.5, 0),
+                        AnchorPoint = Vector2.new(0, 0.5), ZIndex = 103
+                    })
+                    Library:Stroke(checkBox, { Color = Color3.fromRGB(9, 9, 9) })
+                    local checkFill = Library:NewInstance("Frame", {
+                        Parent = checkBox, BorderSizePixel = 0,
+                        BackgroundColor3 = Library.Accent,
+                        Size = UDim2.new(1, -4, 1, -4),
+                        Position = UDim2.new(0, 2, 0, 2),
+                        BackgroundTransparency = 1, ZIndex = 104
+                    })
+                    rowBtn.MouseButton1Click:Connect(function() toggleOption(optName) end)
+                    checkFillMap[optName] = checkFill
+                    multidrop.OptionInstances[optName] = rowBtn
+                end
+
+                if keepSelected and oldValue then
+                    for k in pairs(oldValue) do
+                        if table.find(options, k) then
+                            multidrop.Value[k] = true
+                        end
+                    end
+                end
+                updateSelectionDisplay()
+                for opt, btn in pairs(multidrop.OptionInstances) do
+                    local fill = checkFillMap[opt]
+                    if fill then
+                        fill.BackgroundTransparency = multidrop.Value[opt] and 0 or 1
+                    end
+                end
+            end
+
+            updateSelectionDisplay()
+            return multidrop
+        end
+
         function Library:CreateKeybind(sectionParent, config)
             local bindName = config.name or "Keybind"
             local flag = config.flag
@@ -1632,6 +1947,9 @@ local Library = {
             local bind = {
                 Value = config.default or Enum.KeyCode.Unknown,
                 BindingActive = false,
+                Mode = config.mode or "Toggle",
+                ActiveState = false,
+                MenuOpen = false,
                 Name = bindName
             }
 
@@ -1643,6 +1961,7 @@ local Library = {
             local tweenService = game:GetService("TweenService")
             local userInputService = game:GetService("UserInputService")
             local tweenInfo = TweenInfo.new(DESIGN_CONFIG.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            local topLevelGui = sectionParent.Container:FindFirstAncestorOfClass("ScreenGui")
 
             bind.Frame = self:NewInstance("Frame", {
                 Name = bindName .. "KeybindNode",
@@ -1677,24 +1996,39 @@ local Library = {
                 FontFace = DESIGN_CONFIG.FontProfile,
                 BackgroundTransparency = 1,
                 BorderSizePixel = 0,
-                Size = UDim2.new(0, 150, 1, 0),
+                Size = UDim2.new(0, 120, 1, 0),
                 Position = UDim2.new(0, 8, 0, 0)
             })
             self:NewInstance("UIStroke", { Parent = label, LineJoinMode = Enum.LineJoinMode.Miter })
+
+            -- Mode indicator label (shows T/H/A)
+            local modeLabel = self:NewInstance("TextLabel", {
+                Parent = actionButton,
+                Text = bind.Mode == "Toggle" and "T" or bind.Mode == "Hold" and "H" or "A",
+                TextSize = 10,
+                TextTransparency = 1,
+                TextColor3 = Color3.fromRGB(120, 120, 120),
+                FontFace = DESIGN_CONFIG.FontProfile,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0, 14, 0, 14),
+                Position = UDim2.new(0, 160, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5)
+            })
 
             local bindBox = self:NewInstance("Frame", {
                 Parent = actionButton,
                 BorderSizePixel = 0,
                 BackgroundColor3 = Color3.fromRGB(12, 12, 12),
-                Size = UDim2.new(0, 45, 0, 16),
+                Size = UDim2.new(0, 38, 0, 16),
                 Position = UDim2.new(0, 207, 0.5, 0),
                 AnchorPoint = Vector2.new(1, 0.5)
             })
-            local boxStroke = self:NewInstance("UIStroke", { Parent = bindBox, Color = Color3.fromRGB(18, 18, 18), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            local boxStroke = self:Stroke(bindBox, { Color = Color3.fromRGB(18, 18, 18) })
 
             local bindText = self:NewInstance("TextLabel", {
                 Parent = bindBox,
-                Text = bind.Value == Enum.KeyCode.Unknown and "[NONE]" or "[" .. bind.Value.Name .. "]",
+                Text = "[" .. Library:GetBindName(bind.Value) .. "]",
                 TextSize = 12,
                 TextColor3 = Color3.fromRGB(109, 109, 109),
                 BackgroundTransparency = 1,
@@ -1702,39 +2036,222 @@ local Library = {
                 FontFace = DESIGN_CONFIG.FontProfile
             })
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = surfaceRow,
-                ZIndex = 3,
+            self:BottomLine(surfaceRow)
+
+            -- DETACHED OVERLAY FOR BIND + MODE
+            local bindMenu = self:NewInstance("Frame", {
+                Name = bindName .. "_KeyOverlay",
+                Parent = topLevelGui,
                 BorderSizePixel = 0,
                 BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, -2)
+                Size = UDim2.new(0, 127, 0, 0),
+                BackgroundTransparency = 0,
+                ClipsDescendants = true,
+                Visible = false,
+                ZIndex = 9999
             })
-            self:NewInstance("UIGradient", { Parent = bottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))}) })
+            self:Stroke(bindMenu, { ZIndex = 101, Color = Color3.fromRGB(9, 9, 9) })
 
+            local menuHeader = self:NewInstance("Frame", {
+                Parent = bindMenu,
+                Size = UDim2.new(1, 0, 0, 20),
+                BackgroundColor3 = DESIGN_CONFIG.HeaderBackground,
+                BorderSizePixel = 0,
+                ZIndex = 102
+            })
+            self:Gradient(menuHeader)
+
+            local menuTitle = self:NewInstance("TextLabel", {
+                Parent = menuHeader,
+                Text = bindName,
+                TextSize = 12,
+                TextColor3 = Color3.fromRGB(176, 176, 176),
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                FontFace = DESIGN_CONFIG.FontProfile,
+                ZIndex = 103
+            })
+            self:NewInstance("UIStroke", { Parent = menuTitle, LineJoinMode = Enum.LineJoinMode.Miter })
+
+            -- Bind row
+            local bindRow = self:NewInstance("Frame", {
+                Parent = bindMenu,
+                Size = UDim2.new(1, 0, 0, 24),
+                Position = UDim2.new(0, 0, 0, 20),
+                BackgroundTransparency = 1,
+                ZIndex = 102
+            })
+            local bindLabel = self:NewInstance("TextLabel", {
+                Parent = bindRow, Text = "Keybind", TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = Color3.fromRGB(176, 176, 176),
+                BackgroundTransparency = 1, Position = UDim2.new(0.04, 0, 0, 0),
+                Size = UDim2.new(0, 50, 1, 0), FontFace = DESIGN_CONFIG.FontProfile, ZIndex = 103
+            })
+            local bindTextBtn = self:NewInstance("TextButton", {
+                Parent = bindRow,
+                Text = "[" .. Library:GetBindName(bind.Value) .. "]",
+                TextSize = 12, FontFace = DESIGN_CONFIG.FontProfile,
+                TextColor3 = Color3.fromRGB(109, 109, 109),
+                BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                Size = UDim2.new(0, 32, 0, 12),
+                Position = UDim2.new(0.96, 1, 0.5, 0),
+                AnchorPoint = Vector2.new(1, 0.5), AutoButtonColor = false, ZIndex = 103
+            })
+            self:Stroke(bindTextBtn, { ZIndex = 104, Color = Color3.fromRGB(9, 9, 9) })
+
+            local clearBindBtn = self:NewInstance("TextButton", {
+                Parent = bindRow, Text = "x", TextSize = 10,
+                FontFace = DESIGN_CONFIG.FontProfile,
+                TextColor3 = Color3.fromRGB(180, 60, 60),
+                BackgroundTransparency = 1, Size = UDim2.new(0, 14, 0, 14),
+                Position = UDim2.new(1, -2, 0.5, 0),
+                AnchorPoint = Vector2.new(1, 0.5), ZIndex = 104
+            })
+            clearBindBtn.MouseButton1Click:Connect(function()
+                bind.Value = Enum.KeyCode.Unknown
+                bindTextBtn.Text = "[NONE]"
+                bindText.Text = "[NONE]"
+                if flag then Library.flags[flag] = Enum.KeyCode.Unknown end
+                Library:UpdateKeybindList()
+            end)
+
+            local rowLine = self:NewInstance("Frame", {
+                Parent = bindRow, ZIndex = 103, BorderSizePixel = 0,
+                BackgroundColor3 = Color3.fromRGB(23, 23, 23),
+                Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, 1, 0)
+            })
+            self:Gradient(rowLine, 90, GRADIENT_BOTTOM_LINE)
+
+            -- Mode row
+            local modeRow = self:NewInstance("Frame", {
+                Parent = bindMenu, Size = UDim2.new(1, 0, 0, 30),
+                Position = UDim2.new(0, 0, 0, 44), BackgroundTransparency = 1, ZIndex = 102
+            })
+            local modeDropdownBtn = self:NewInstance("TextButton", {
+                Parent = modeRow, Text = "", BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+                Size = UDim2.new(0, 115, 0, 15), Position = UDim2.new(0.043, 0, 0.26, 0),
+                AutoButtonColor = false, ZIndex = 103
+            })
+            self:Stroke(modeDropdownBtn, { ZIndex = 104, Color = Color3.fromRGB(9, 9, 9) })
+            local modeDisplayLabel = self:NewInstance("TextLabel", {
+                Parent = modeDropdownBtn, Text = bind.Mode,
+                TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = Color3.fromRGB(157, 157, 157),
+                BackgroundTransparency = 1, Size = UDim2.new(0.8, 0, 1, 0),
+                Position = UDim2.new(0.05, 0, 0, 0), FontFace = DESIGN_CONFIG.FontProfile, ZIndex = 104
+            })
+            local modeCycleIcon = self:NewInstance("TextButton", {
+                Parent = modeRow, Text = "+", TextSize = 12,
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                BackgroundTransparency = 1, Size = UDim2.new(0, 8, 0, 8),
+                Position = UDim2.new(0.877, 0, 0.37, 0), FontFace = DESIGN_CONFIG.FontProfile, ZIndex = 104
+            })
+            local modeBottomLine = self:NewInstance("Frame", {
+                Parent = modeRow, ZIndex = 103, BorderSizePixel = 0,
+                BackgroundColor3 = Color3.fromRGB(23, 23, 23),
+                Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, 1, 0)
+            })
+            self:Gradient(modeBottomLine, 90, GRADIENT_BOTTOM_LINE)
+
+            local subModes = { "Toggle", "Hold", "Always" }
+            local currentModeIdx = 1
+            for i, m in ipairs(subModes) do if m == bind.Mode then currentModeIdx = i break end end
+
+            local function cycleMode()
+                currentModeIdx = (currentModeIdx % #subModes) + 1
+                bind.Mode = subModes[currentModeIdx]
+                modeDisplayLabel.Text = bind.Mode
+                modeLabel.Text = bind.Mode == "Toggle" and "T" or bind.Mode == "Hold" and "H" or "A"
+                if bind.Mode == "Always" then
+                    bind.ActiveState = true
+                    tweenService:Create(bindBox, tweenInfo, { BackgroundColor3 = Color3.fromRGB(25, 25, 25) }):Play()
+                else
+                    bind.ActiveState = false
+                    tweenService:Create(bindBox, tweenInfo, { BackgroundColor3 = Color3.fromRGB(12, 12, 12) }):Play()
+                end
+                Library:UpdateKeybindList()
+            end
+            modeDropdownBtn.MouseButton1Click:Connect(cycleMode)
+            modeCycleIcon.MouseButton1Click:Connect(cycleMode)
+
+            -- Overlay toggle
+            local isHovering = false
+            bindMenu.MouseEnter:Connect(function() isHovering = true end)
+            bindMenu.MouseLeave:Connect(function() isHovering = false end)
+
+            local function closeMenuSmoothly()
+                if not bind.MenuOpen then return end
+                bind.MenuOpen = false
+                local ct = tweenService:Create(bindMenu, tweenInfo, { Size = UDim2.new(0, 127, 0, 0) })
+                ct:Play()
+                ct.Completed:Connect(function()
+                    if not bind.MenuOpen then bindMenu.Visible = false end
+                end)
+            end
+
+            local function toggleMenu()
+                bind.MenuOpen = not bind.MenuOpen
+                local targetHeight = bind.MenuOpen and 74 or 0
+                if bind.MenuOpen then
+                    local pos = bind.Frame.AbsolutePosition
+                    bindMenu.Position = UDim2.new(0, pos.X + 220, 0, pos.Y)
+                    bindMenu.Visible = true
+                end
+                local mt = tweenService:Create(bindMenu, tweenInfo, { Size = UDim2.new(0, 127, 0, targetHeight) })
+                mt:Play()
+                if not bind.MenuOpen then
+                    mt.Completed:Connect(function()
+                        if not bind.MenuOpen then bindMenu.Visible = false end
+                    end)
+                end
+            end
+
+            self:Track(userInputService.InputBegan:Connect(function(input, processed)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
+                    if bind.MenuOpen and not bind.BindingActive then
+                        if not isHovering then closeMenuSmoothly() end
+                    end
+                end
+            end))
+
+            bind.Frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+                if bind.MenuOpen then
+                    local pos = bind.Frame.AbsolutePosition
+                    bindMenu.Position = UDim2.new(0, pos.X + 220, 0, pos.Y)
+                end
+            end)
+
+            -- Left click: enter binding mode
             actionButton.MouseButton1Click:Connect(function()
                 if bind.BindingActive then return end
                 bind.BindingActive = true
-                bindText.Text = "[...]"
-                bindText.TextColor3 = Library.Accent
+                bindTextBtn.Text = "[...]"
+                bindTextBtn.TextColor3 = Library.Accent
                 tweenService:Create(boxStroke, tweenInfo, { Color = Library.Accent }):Play()
 
                 local connection
                 connection = userInputService.InputBegan:Connect(function(input, processed)
-                    if processed then return end
-                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
                         connection:Disconnect()
-
-                        if input.KeyCode == Enum.KeyCode.Escape then
-                            bind.Value = Enum.KeyCode.Unknown
-                            bindText.Text = "[NONE]"
-                        else
-                            bind.Value = input.KeyCode
-                            bindText.Text = "[" .. input.KeyCode.Name .. "]"
-                        end
-
+                        bind.Value = Enum.KeyCode.Unknown
+                        bindTextBtn.Text = "[NONE]"
+                        bindText.Text = "[NONE]"
+                        if flag then Library.flags[flag] = Enum.KeyCode.Unknown end
+                        bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
+                        tweenService:Create(boxStroke, tweenInfo, { Color = Color3.fromRGB(18, 18, 18) }):Play()
+                        bind.BindingActive = false
+                        Library:UpdateKeybindList()
+                        return
+                    end
+                    if processed then return end
+                    if Library:IsInputBindable(input) then
+                        connection:Disconnect()
+                        bind.Value = Library:BindFromInput(input)
+                        bindTextBtn.Text = "[" .. Library:GetBindName(bind.Value) .. "]"
+                        bindText.Text = "[" .. Library:GetBindName(bind.Value) .. "]"
                         if flag then Library.flags[flag] = bind.Value end
-                        bindText.TextColor3 = Color3.fromRGB(109, 109, 109)
+                        bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
                         tweenService:Create(boxStroke, tweenInfo, { Color = Color3.fromRGB(18, 18, 18) }):Play()
                         bind.BindingActive = false
                         Library:UpdateKeybindList()
@@ -1742,32 +2259,97 @@ local Library = {
                 end)
             end)
 
-            userInputService.InputBegan:Connect(function(input, processed)
-                if processed or bind.Value == Enum.KeyCode.Unknown or bind.BindingActive then return end
-                if input.KeyCode == bind.Value then
-                    bind.ActiveState = true
-                    Library:UpdateKeybindList()
-                    tweenService:Create(bindBox, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(25, 25, 25) }):Play()
+            -- Right click: toggle overlay
+            actionButton.MouseButton2Click:Connect(toggleMenu)
 
-                    if callback then
-                        callback()
+            -- Bind capture in overlay
+            bindTextBtn.MouseButton1Click:Connect(function()
+                if bind.BindingActive then return end
+                bind.BindingActive = true
+                bindTextBtn.Text = "[...]"
+                bindTextBtn.TextColor3 = Library.Accent
+
+                local connection
+                connection = userInputService.InputBegan:Connect(function(input, processed)
+                    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
+                        connection:Disconnect()
+                        bind.Value = Enum.KeyCode.Unknown
+                        bindTextBtn.Text = "[NONE]"
+                        bindText.Text = "[NONE]"
+                        if flag then Library.flags[flag] = Enum.KeyCode.Unknown end
+                        bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
+                        bind.BindingActive = false
+                        Library:UpdateKeybindList()
+                        return
                     end
-                end
+                    if processed then return end
+                    if Library:IsInputBindable(input) then
+                        connection:Disconnect()
+                        bind.Value = Library:BindFromInput(input)
+                        bindTextBtn.Text = "[" .. Library:GetBindName(bind.Value) .. "]"
+                        bindText.Text = "[" .. Library:GetBindName(bind.Value) .. "]"
+                        if flag then Library.flags[flag] = bind.Value end
+                        bindTextBtn.TextColor3 = Color3.fromRGB(109, 109, 109)
+                        bind.BindingActive = false
+                        Library:UpdateKeybindList()
+                    end
+                end)
             end)
 
-            userInputService.InputEnded:Connect(function(input)
-                if bind.Value == Enum.KeyCode.Unknown then return end
-                if input.KeyCode == bind.Value then
-                    bind.ActiveState = false
-                    Library:UpdateKeybindList()
-                    tweenService:Create(bindBox, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(12, 12, 12) }):Play()
+            -- Input listeners with mode support
+            self:Track(userInputService.InputBegan:Connect(function(input, processed)
+                if processed or bind.BindingActive then return end
+                if not Library:IsBindMatch(input, bind.Value) or bind.Value == Enum.KeyCode.Unknown then return end
+
+                if bind.Mode == "Toggle" then
+                    bind.ActiveState = not bind.ActiveState
+                    if bind.ActiveState then
+                        tweenService:Create(bindBox, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(25, 25, 25) }):Play()
+                    else
+                        tweenService:Create(bindBox, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(12, 12, 12) }):Play()
+                    end
+                    if callback then callback(bind.ActiveState) end
+                elseif bind.Mode == "Hold" or bind.Mode == "Always" then
+                    bind.ActiveState = true
+                    tweenService:Create(bindBox, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(25, 25, 25) }):Play()
+                    if callback then callback() end
                 end
+                Library:UpdateKeybindList()
+            end))
+
+            self:Track(userInputService.InputEnded:Connect(function(input)
+                if not Library:IsBindMatch(input, bind.Value) or bind.Value == Enum.KeyCode.Unknown then return end
+                if bind.Mode == "Always" then return end
+                bind.ActiveState = false
+                Library:UpdateKeybindList()
+                tweenService:Create(bindBox, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { BackgroundColor3 = Color3.fromRGB(12, 12, 12) }):Play()
+            end))
+
+            bind.Frame.Destroying:Connect(function()
+                bindMenu:Destroy()
             end)
 
             function bind:Set(key)
                 bind.Value = key
-                bindText.Text = key == Enum.KeyCode.Unknown and "[NONE]" or "[" .. key.Name .. "]"
+                bindText.Text = "[" .. Library:GetBindName(key) .. "]"
+                bindTextBtn.Text = "[" .. Library:GetBindName(key) .. "]"
                 if flag then Library.flags[flag] = key end
+                Library:UpdateKeybindList()
+            end
+
+            function bind:SetMode(mode)
+                bind.Mode = mode
+                modeDisplayLabel.Text = mode
+                modeLabel.Text = mode == "Toggle" and "T" or mode == "Hold" and "H" or "A"
+                local idx = table.find(subModes, mode)
+                if idx then currentModeIdx = idx end
+                if mode == "Always" then
+                    bind.ActiveState = true
+                    tweenService:Create(bindBox, tweenInfo, { BackgroundColor3 = Color3.fromRGB(25, 25, 25) }):Play()
+                else
+                    bind.ActiveState = false
+                    tweenService:Create(bindBox, tweenInfo, { BackgroundColor3 = Color3.fromRGB(12, 12, 12) }):Play()
+                end
                 Library:UpdateKeybindList()
             end
 
@@ -1818,16 +2400,8 @@ local Library = {
                     BorderSizePixel = 0,
                     ZIndex = 8
                 })
-                self:NewInstance("UIGradient", {
-                    Parent = pickerBtn,
-                    Rotation = 90,
-                    Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                        ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                        ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                    })
-                })
-                self:NewInstance("UIStroke", { Parent = pickerBtn, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Miter })
+                self:Gradient(pickerBtn)
+                self:Stroke(pickerBtn, { Color = Color3.fromRGB(9, 9, 9) })
                 colorPicker.Frame = pickerBtn
             else
                 colorPicker.Frame = self:NewInstance("Frame", {
@@ -1871,26 +2445,10 @@ local Library = {
                     BorderSizePixel = 0,
                     ZIndex = 5
                 })
-                self:NewInstance("UIGradient", {
-                    Parent = pickerBtn,
-                    Rotation = 90,
-                    Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                        ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                        ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                    })
-                })
-                self:NewInstance("UIStroke", { Parent = pickerBtn, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Miter })
+                self:Gradient(pickerBtn)
+                self:Stroke(pickerBtn, { Color = Color3.fromRGB(9, 9, 9) })
 
-                local bottomLine = self:NewInstance("Frame", {
-                    Parent = surfaceRow,
-                    ZIndex = 3,
-                    BorderSizePixel = 0,
-                    BackgroundColor3 = DESIGN_CONFIG.Background,
-                    Size = UDim2.new(1, 0, 0, 2),
-                    Position = UDim2.new(0, 0, 1, -1)
-                })
-                self:NewInstance("UIGradient", { Parent = bottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))}) })
+                self:BottomLine(surfaceRow)
             end
 
             -- DETACHED FLOATING POPUP OVERLAY (COLORPICKERMENU Style)
@@ -1905,23 +2463,9 @@ local Library = {
                 ZIndex = 9999
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = popupPanel,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(popupPanel)
 
-            local popupStroke = self:NewInstance("UIStroke", {
-                Parent = popupPanel,
-                ZIndex = 101,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            local popupStroke = self:Stroke(popupPanel, { ZIndex = 101, Color = Color3.fromRGB(9, 9, 9) })
 
             -- Title/Header frame for the popup window
             local popupHeader = self:NewInstance("Frame", {
@@ -1933,15 +2477,7 @@ local Library = {
                 ZIndex = 102
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = popupHeader,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(popupHeader)
 
             local popupTitle = self:NewInstance("TextLabel", {
                 Parent = popupHeader,
@@ -1957,15 +2493,7 @@ local Library = {
                 ZIndex = 103
             })
             self:NewInstance("UIStroke", { Parent = popupTitle, LineJoinMode = Enum.LineJoinMode.Miter })
-            self:NewInstance("UIGradient", {
-                Parent = popupTitle,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(popupTitle)
 
             ---------------------------------------------------------
             -- TAB BAR SYSTEM FOR COLOR POPUP
@@ -1979,15 +2507,11 @@ local Library = {
                 Position = UDim2.new(0, 0, 0, 20),
                 ZIndex = 102
             })
-            self:NewInstance("UIGradient", {
-                Parent = tabBar,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(200, 200, 200))
-                })
-            })
-            self:NewInstance("UIStroke", { Parent = tabBar, Color = Color3.fromRGB(16, 16, 16), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Gradient(tabBar, 90, ColorSequence.new({
+                ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
+                ColorSequenceKeypoint.new(1.000, Color3.fromRGB(200, 200, 200))
+            }))
+            self:Stroke(tabBar, { Color = Color3.fromRGB(16, 16, 16) })
 
             local solidTabBtn = self:NewInstance("TextButton", {
                 Name = "SolidTab",
@@ -2102,22 +2626,18 @@ local Library = {
                 BorderSizePixel = 0,
                 ZIndex = 102
             })
-            self:NewInstance("UIStroke", { Parent = hueTrack, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Miter })
+            self:Stroke(hueTrack, { Color = Color3.fromRGB(9, 9, 9) })
 
             -- Native full-spectrum color sequence generator mapping
-            self:NewInstance("UIGradient", {
-                Parent = hueTrack,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
-                    ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
-                    ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
-                    ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
-                    ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
-                    ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
-                    ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))
-                })
-            })
+            self:Gradient(hueTrack, 90, ColorSequence.new({
+                ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+                ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+                ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+                ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+                ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+                ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+                ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))
+            }))
 
             local hueCursor = self:NewInstance("Frame", {
                 Parent = hueTrack,
@@ -2152,23 +2672,9 @@ local Library = {
                 ZIndex = 103
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = modeButton,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(219, 219, 219)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                })
-            })
+            self:Gradient(modeButton, 90, GRADIENT_BUTTON)
 
-            self:NewInstance("UIStroke", {
-                Parent = modeButton,
-                ZIndex = 104,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(modeButton, { ZIndex = 104, Color = Color3.fromRGB(9, 9, 9) })
 
             local selectedMode = "RGB"
 
@@ -2211,13 +2717,7 @@ local Library = {
                 ClipsDescendants = true,
                 ZIndex = 200
             })
-            self:NewInstance("UIStroke", {
-                Parent = modeMenu,
-                ZIndex = 201,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(modeMenu, { ZIndex = 201, Color = Color3.fromRGB(9, 9, 9) })
 
             self:NewInstance("UIListLayout", {
                 Parent = modeMenu,
@@ -2390,7 +2890,7 @@ local Library = {
                 end
             end)
 
-            userInputService.InputChanged:Connect(function(input)
+            self:Track(userInputService.InputChanged:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseMovement then
                     if colorPicker.CanvasDragging then
                         processCanvasInput(input)
@@ -2398,14 +2898,14 @@ local Library = {
                         processHueInput(input)
                     end
                 end
-            end)
+            end))
 
-            userInputService.InputEnded:Connect(function(input)
+            self:Track(userInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     colorPicker.CanvasDragging = false
                     colorPicker.HueDragging = false
                 end
-            end)
+            end))
 
             ---------------------------------------------------------
             -- ANIMATION VIEW & CONTROLS CREATION
@@ -2464,16 +2964,8 @@ local Library = {
                 AnchorPoint = Vector2.new(1, 0.5),
                 ZIndex = 105
             })
-            self:NewInstance("UIGradient", {
-                Parent = rainbowStatusBox,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(214, 214, 214))
-                })
-            })
-            self:NewInstance("UIStroke", { Parent = rainbowStatusBox, ZIndex = 106, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+            self:Gradient(rainbowStatusBox)
+            self:Stroke(rainbowStatusBox, { ZIndex = 106, Color = Color3.fromRGB(9, 9, 9) })
 
             local rainbowFill = self:NewInstance("Frame", {
                 Parent = rainbowStatusBox,
@@ -2483,14 +2975,7 @@ local Library = {
                 BackgroundTransparency = 1,
                 ZIndex = 107
             })
-            self:NewInstance("UIGradient", {
-                Parent = rainbowFill,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(130, 130, 130))
-                })
-            })
+            self:Gradient(rainbowFill, 90, GRADIENT_ACCENT_FILL)
 
             updateRainbowUI = function()
                 local targetTransparency = colorPicker.Rainbow and 0 or 1
@@ -2544,22 +3029,8 @@ local Library = {
                 AutoButtonColor = false,
                 ZIndex = 104
             })
-            self:NewInstance("UIGradient", {
-                Parent = speedTrack,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(223, 223, 223)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
-            self:NewInstance("UIStroke", {
-                Parent = speedTrack,
-                ZIndex = 105,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Gradient(speedTrack, 90, GRADIENT_SLIDER_TRACK)
+            self:Stroke(speedTrack, { ZIndex = 105, Color = Color3.fromRGB(9, 9, 9) })
 
             local speedFill = self:NewInstance("Frame", {
                 Parent = speedTrack,
@@ -2568,14 +3039,7 @@ local Library = {
                 Size = UDim2.new(0.2, 0, 1, 0),
                 ZIndex = 105
             })
-            self:NewInstance("UIGradient", {
-                Parent = speedFill,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(130, 130, 130))
-                })
-            })
+            self:Gradient(speedFill, 90, GRADIENT_ACCENT_FILL)
 
             local speedIncBtn = self:NewInstance("TextButton", {
                 Parent = speedRow,
@@ -2627,17 +3091,17 @@ local Library = {
                 end
             end)
 
-            userInputService.InputChanged:Connect(function(input)
+            self:Track(userInputService.InputChanged:Connect(function(input)
                 if speedDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
                     updateSpeedFromInput(input)
                 end
-            end)
+            end))
 
-            userInputService.InputEnded:Connect(function(input)
+            self:Track(userInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     speedDragging = false
                 end
-            end)
+            end))
 
             speedIncBtn.MouseButton1Click:Connect(function()
                 colorPicker.Speed = math.clamp(colorPicker.Speed + 0.1, 0.1, 5.0)
@@ -2710,7 +3174,7 @@ local Library = {
             popupPanel.MouseEnter:Connect(function() popupHovering = true end)
             popupPanel.MouseLeave:Connect(function() popupHovering = false end)
 
-            userInputService.InputBegan:Connect(function(input)
+            self:Track(userInputService.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     if colorPicker.Open and not popupHovering then
                         local mouseLoc = userInputService:GetMouseLocation()
@@ -2723,7 +3187,7 @@ local Library = {
                         end
                     end
                 end
-            end)
+            end))
 
             colorPicker.Frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
                 if colorPicker.Open then updatePopupPosition() end
@@ -2795,22 +3259,9 @@ local Library = {
                 AutoButtonColor = true
             })
 
-            self:NewInstance("UIStroke", {
-                Parent = button.ActionButton,
-                Color = Color3.fromRGB(9, 9, 9),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(button.ActionButton, { Color = Color3.fromRGB(9, 9, 9) })
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = surfaceRow,
-                ZIndex = 3,
-                BorderSizePixel = 0,
-                BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, -2)
-            })
-            self:NewInstance("UIGradient", { Parent = bottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(153, 153, 153))}) })
+            self:BottomLine(surfaceRow)
 
             button.ActionButton.MouseButton1Click:Connect(function()
                 if callback then
@@ -2873,18 +3324,10 @@ local Library = {
                 ClearTextOnFocus = false,
                 TextXAlignment = Enum.TextXAlignment.Left
             })
-            self:NewInstance("UIStroke", { Parent = textbox.InputBox, Color = Color3.fromRGB(9, 9, 9), ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Miter })
+            self:Stroke(textbox.InputBox, { Color = Color3.fromRGB(9, 9, 9) })
             self:NewInstance("UIPadding", { Parent = textbox.InputBox, PaddingLeft = UDim.new(0, 5) })
 
-            local bottomLine = self:NewInstance("Frame", {
-                Parent = textbox.Frame,
-                ZIndex = 5,
-                BorderSizePixel = 0,
-                BackgroundColor3 = DESIGN_CONFIG.Background,
-                Size = UDim2.new(1, 0, 0, 2),
-                Position = UDim2.new(0, 0, 1, -2)
-            })
-            self:NewInstance("UIGradient", { Parent = bottomLine, Rotation = 90, Color = ColorSequence.new({ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1.000, Color3.fromRGB(154, 154, 154))}) })
+            self:BottomLine(textbox.Frame)
 
             textbox.InputBox.FocusLost:Connect(function(enterPressed)
                 textbox.Value = textbox.InputBox.Text
@@ -2905,6 +3348,71 @@ local Library = {
             end
 
             return textbox
+        end
+
+        function Library:CreateLabel(section, config)
+            config = config or {}
+
+            local label = {}
+            label.Section = section
+            label.Type = "Label"
+
+            label.Frame = self:NewInstance("Frame", {
+                Parent = section.Container,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y
+            })
+
+            label.TextLabel = self:NewInstance("TextLabel", {
+                Parent = label.Frame,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1, -16, 0, 0),
+                Position = UDim2.new(0, 8, 0, 6),
+                Text = config.text or config.name or "",
+                TextSize = 12,
+                TextColor3 = Color3.fromRGB(140, 140, 140),
+                FontFace = DESIGN_CONFIG.FontProfile,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true,
+                AutomaticSize = Enum.AutomaticSize.Y,
+                RichText = true
+            })
+
+            function label:Set(text)
+                label.TextLabel.Text = text
+            end
+
+            return label
+        end
+
+        function Library:CreateSeparator(section, config)
+            config = config or {}
+
+            local separator = {}
+            separator.Section = section
+            separator.Type = "Separator"
+
+            separator.Frame = self:NewInstance("Frame", {
+                Parent = section.Container,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1, 0, 0, 14)
+            })
+
+            local line = self:NewInstance("Frame", {
+                Parent = separator.Frame,
+                BackgroundColor3 = Color3.fromRGB(14, 14, 14),
+                BorderSizePixel = 0,
+                Size = UDim2.new(1, -16, 0, 1),
+                Position = UDim2.new(0, 8, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5)
+            })
+            self:Stroke(line, { Color = Color3.fromRGB(9, 9, 9) })
+
+            return separator
         end
 
         function Library:CreateSkinsTab(config)
@@ -2931,12 +3439,7 @@ local Library = {
                 AutoButtonColor = true,
                 ZIndex = 5
             })
-            self:NewInstance("UIStroke", {
-                Parent = selectGunBtn,
-                Color = Color3.fromRGB(14, 14, 14),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(selectGunBtn, { Color = Color3.fromRGB(14, 14, 14) })
 
             local skinSearch = self:NewInstance("TextBox", {
                 Name = "SkinSearch",
@@ -2955,12 +3458,7 @@ local Library = {
                 ClearTextOnFocus = false,
                 ZIndex = 1
             })
-            self:NewInstance("UIStroke", {
-                Parent = skinSearch,
-                Color = Color3.fromRGB(14, 14, 14),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(skinSearch, { Color = Color3.fromRGB(14, 14, 14) })
             self:NewInstance("UIPadding", {
                 Parent = skinSearch,
                 PaddingLeft = UDim.new(0, 5)
@@ -2981,12 +3479,7 @@ local Library = {
                 AutomaticCanvasSize = Enum.AutomaticSize.Y,
                 ZIndex = 1
             })
-            self:NewInstance("UIStroke", {
-                Parent = skinHolder,
-                Color = Color3.fromRGB(14, 14, 14),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(skinHolder, { Color = Color3.fromRGB(14, 14, 14) })
             self:NewInstance("UIPadding", {
                 Parent = skinHolder,
                 PaddingLeft = UDim.new(0, 4),
@@ -3016,12 +3509,7 @@ local Library = {
                 AutoButtonColor = true,
                 ZIndex = 1
             })
-            self:NewInstance("UIStroke", {
-                Parent = applyBtn,
-                Color = Color3.fromRGB(14, 14, 14),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(applyBtn, { Color = Color3.fromRGB(14, 14, 14) })
 
             -- Gun Selector Dropdown Menu Overlay
             local gunDropdown = self:NewInstance("ScrollingFrame", {
@@ -3040,12 +3528,7 @@ local Library = {
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 AutomaticCanvasSize = Enum.AutomaticSize.Y
             })
-            self:NewInstance("UIStroke", {
-                Parent = gunDropdown,
-                Color = Color3.fromRGB(14, 14, 14),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(gunDropdown, { Color = Color3.fromRGB(14, 14, 14) })
             local gunListLayout = self:NewInstance("UIListLayout", {
                 Parent = gunDropdown,
                 SortOrder = Enum.SortOrder.LayoutOrder
@@ -3137,14 +3620,10 @@ local Library = {
                             BorderSizePixel = 0,
                             ZIndex = 3
                         })
-                        self:NewInstance("UIGradient", {
-                            Parent = preview,
-                            Rotation = 45,
-                            Color = ColorSequence.new({
-                                ColorSequenceKeypoint.new(0.000, skin.colors[1]),
-                                ColorSequenceKeypoint.new(1.000, skin.colors[2])
-                            })
-                        })
+                        self:Gradient(preview, 45, ColorSequence.new({
+                            ColorSequenceKeypoint.new(0.000, skin.colors[1]),
+                            ColorSequenceKeypoint.new(1.000, skin.colors[2])
+                        }))
                     end
 
                     -- Skin Name Label
@@ -3228,12 +3707,7 @@ local Library = {
                     AutoButtonColor = true,
                     ZIndex = 51
                 })
-                self:NewInstance("UIStroke", {
-                    Parent = gunBtn,
-                    Color = Color3.fromRGB(14, 14, 14),
-                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                    LineJoinMode = Enum.LineJoinMode.Miter
-                })
+                self:Stroke(gunBtn, { Color = Color3.fromRGB(14, 14, 14) })
 
                 gunBtn.MouseButton1Click:Connect(function()
                     skinsControl.SelectedGun = gunName
@@ -3326,12 +3800,17 @@ local Library = {
                     data[flag] = {
                         Type = "Toggle",
                         State = element.State,
-                        Bind = element.Bind ~= Enum.KeyCode.Unknown and element.Bind.Name or "Unknown",
+                        Bind = Library:GetBindName(element.Bind),
                         Mode = element.Mode
                     }
                 elseif element.Track ~= nil then -- Slider
                     data[flag] = {
                         Type = "Slider",
+                        Value = element.Value
+                    }
+                elseif element._isMulti then -- MultiDropdown
+                    data[flag] = {
+                        Type = "MultiDropdown",
                         Value = element.Value
                     }
                 elseif element.OptionInstances ~= nil then -- Dropdown
@@ -3342,7 +3821,8 @@ local Library = {
                 elseif element.BindingActive ~= nil then -- Keybind
                     data[flag] = {
                         Type = "Keybind",
-                        Value = element.Value ~= Enum.KeyCode.Unknown and element.Value.Name or "Unknown"
+                        Value = Library:GetBindName(element.Value),
+                        Mode = element.Mode
                     }
                 elseif element.CanvasDragging ~= nil then -- ColorPicker
                     data[flag] = {
@@ -3401,7 +3881,7 @@ local Library = {
                                 element:Set(saved.State)
                             end
                             if saved.Bind then
-                                local key = Enum.KeyCode[saved.Bind] or Enum.KeyCode.Unknown
+                                local key = Library:ResolveBind(saved.Bind)
                                 element:SetBind(key)
                             end
                             if saved.Mode then
@@ -3411,9 +3891,16 @@ local Library = {
                             element:Set(saved.Value)
                         elseif saved.Type == "Dropdown" then
                             element:Set(saved.Value)
+                        elseif saved.Type == "MultiDropdown" then
+                            if type(saved.Value) == "table" then
+                                element:Set(saved.Value)
+                            end
                         elseif saved.Type == "Keybind" then
-                            local key = Enum.KeyCode[saved.Value] or Enum.KeyCode.Unknown
+                            local key = Library:ResolveBind(saved.Value)
                             element:Set(key)
+                            if saved.Mode then
+                                element:SetMode(saved.Mode)
+                            end
                         elseif saved.Type == "ColorPicker" then
                             if type(saved.Value) == "table" and #saved.Value == 3 then
                                 local color = Color3.new(saved.Value[1], saved.Value[2], saved.Value[3])
@@ -3440,13 +3927,17 @@ local Library = {
                             if type(saved) == "number" then
                                 element:Set(saved)
                             end
+                        elseif element._isMulti then
+                            if type(saved) == "table" then
+                                element:Set(saved)
+                            end
                         elseif element.OptionInstances ~= nil then
                             if type(saved) == "string" then
                                 element:Set(saved)
                             end
                         elseif element.BindingActive ~= nil then
                             if type(saved) == "string" then
-                                local key = Enum.KeyCode[saved] or Enum.KeyCode.Unknown
+                                local key = Library:ResolveBind(saved)
                                 element:Set(key)
                             end
                         elseif element.CanvasDragging ~= nil then
@@ -3482,7 +3973,10 @@ local Library = {
             end
 
             -- Rebuild list of keybinds
+            local seen = {}
             for flag, element in pairs(self.Elements) do
+                if seen[element] then continue end
+                seen[element] = true
                 -- Toggle / Sub-component binds inside Toggles
                 if element.Bind and element.Bind ~= Enum.KeyCode.Unknown then
                     local modeChar = "T"
@@ -3494,7 +3988,7 @@ local Library = {
 
                     local name = element.Name or flag:gsub("_flag", ""):gsub("_", " "):gsub("^%l", string.upper)
                     local active = element.State or false
-                    local text = string.format("[%s] %s -> %s", modeChar, name, element.Bind.Name)
+                    local text = string.format("[%s] %s -> %s", modeChar, name, Library:GetBindName(element.Bind))
                     local textColor = active and Color3.fromRGB(221, 50, 50) or Color3.fromRGB(176, 176, 176)
 
                     local bindFrame = self:NewInstance("Frame", {
@@ -3521,7 +4015,7 @@ local Library = {
                 elseif element.BindingActive ~= nil and element.Value and element.Value ~= Enum.KeyCode.Unknown then
                     local name = element.Name or flag:gsub("_flag", ""):gsub("_", " "):gsub("^%l", string.upper)
                     local active = element.ActiveState or false
-                    local text = string.format("[K] %s -> %s", name, element.Value.Name)
+                    local text = string.format("[K] %s -> %s", name, Library:GetBindName(element.Value))
                     local textColor = active and Color3.fromRGB(221, 50, 50) or Color3.fromRGB(176, 176, 176)
 
                     local bindFrame = self:NewInstance("Frame", {
@@ -3567,23 +4061,9 @@ local Library = {
                 GroupTransparency = 1
             })
 
-            self:NewInstance("UIGradient", {
-                Parent = notifFrame,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(notifFrame)
 
-            self:NewInstance("UIStroke", {
-                Parent = notifFrame,
-                ZIndex = 2,
-                Color = Color3.fromRGB(16, 16, 16),
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            })
+            self:Stroke(notifFrame, { ZIndex = 2, Color = Color3.fromRGB(16, 16, 16) })
 
             local title = self:NewInstance("TextLabel", {
                 Parent = notifFrame,
@@ -3598,15 +4078,7 @@ local Library = {
                 Position = UDim2.new(0, 8, 0, 0)
             })
             self:NewInstance("UIStroke", { Parent = title, LineJoinMode = Enum.LineJoinMode.Miter })
-            self:NewInstance("UIGradient", {
-                Parent = title,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(0.509, Color3.fromRGB(237, 237, 237)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(223, 223, 223))
-                })
-            })
+            self:Gradient(title)
 
             local accent = self:NewInstance("Frame", {
                 Parent = notifFrame,
@@ -3615,14 +4087,7 @@ local Library = {
                 BackgroundColor3 = self.Accent,
                 Size = UDim2.new(0, 2, 1, 0)
             })
-            self:NewInstance("UIGradient", {
-                Parent = accent,
-                Rotation = -180,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
+            self:Gradient(accent, -180, GRADIENT_DIVIDER)
 
             local timerBar = self:NewInstance("Frame", {
                 Parent = notifFrame,
@@ -3632,14 +4097,7 @@ local Library = {
                 Size = UDim2.new(1, 0, 0, 2),
                 Position = UDim2.new(0, 0, 1, -2)
             })
-            self:NewInstance("UIGradient", {
-                Parent = timerBar,
-                Rotation = 90,
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 255, 255)),
-                    ColorSequenceKeypoint.new(1.000, Color3.fromRGB(45, 45, 45))
-                })
-            })
+            self:Gradient(timerBar, 90, GRADIENT_DIVIDER)
 
             -- Fade in
             tweenService:Create(notifFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
